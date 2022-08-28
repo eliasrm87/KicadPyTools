@@ -1,95 +1,55 @@
-import os.path
-import sys
-from collections import defaultdict
+from lib.s_expression import *
 from lib.comp_db import *
 
-Token   = str
-String  = str
-Integer = int
-Float   = float
-
-# An object consists of an object name and a list of arguments
-class Object():
-  def __init__(self, name = "undefined", args = []):
-    self.objName = name
-    self.objArgs = args
-
-  @classmethod
-  def fromList(cls, elements : list):
-    name = elements.pop(0)
-    return cls(name, elements)
-
-  def objargsNamed(self, objName : str):
-    ojects = []
-    for obj in self.objArgs:
-      if isinstance(obj, Object):
-        if obj.objName == objName:
-          ojects.append(obj)
-    return ojects
-
-  def serialize(self, level = 1):
-    result = ''
-    newFragment = ''
-    identation = ' ' * level * 2
-    newLine = '(' + self.objName
-    for a in self.objArgs:
-      if callable(getattr(a, "serialize", None)):
-        newFragment = a.serialize(level + 1)
-      else:
-        newFragment = str(a)
-      # Add some identation and new lines
-      if (len(newLine) + len(newFragment)) < 100:
-        newLine += ' ' + newFragment
-      else:
-        result += newLine + '\n'
-        newLine = identation + newFragment
-    # Update resulting string
-    result += newLine + ')'
-    return result
-
-class Property(Object):
+class Property(SExpr):
   @classmethod
   def new(cls, propName, propVal, x, y, propId):
-    return cls('property', [
-      String('"' + propName + '"'),
-      String('"' + propVal + '"'),
-      Object('id', [propId]),
-      Object('at', [x, y, 0]),
-      Object('effects', [
-        Object('font', [
-          Object('size', [1.27, 1.27])
+    return cls(SExpr('property', [
+      String(propName),
+      String(propVal),
+      SExpr('id', [propId]),
+      SExpr('at', [x, y, 0]),
+      SExpr('effects', [
+        SExpr('font', [
+          SExpr('size', [1.27, 1.27])
         ]),
         'hide'
       ])
-    ])
+    ]))
+
+  def copy(self):
+    return Property(super().copy())
 
   def name(self):
-    return self.objArgs[0].strip('"')
+    return self._args[0]._value.strip('"')
 
   def value(self):
-    return self.objArgs[1].strip('"')
+    return self._args[1]._value.strip('"')
 
   def pid(self):
-    return self.objargsNamed('id')[0].objArgs[0]
+    return self.argsNamed('id')[0]._args[0]._value
 
   def setName(self, newName):
-    self.objArgs[0] = '"' + newName + '"'
+    self._args[0]._value = String(newName)
 
   def setValue(self, newVal):
-    self.objArgs[1] = '"' + newVal + '"'
+    self._args[1]._value = String(newVal)
 
   def setId(self, newId):
-    self.objargsNamed('id')[0].objArgs[0] = newId
+    self.argsNamed('id')[0]._args[0]._value = newId
 
-class Symbol(Object):
+class Symbol(SExpr):
   specialReferences = ['#PWR', '#FLG', '#GND', '#SYM']
   specialValues     = ['MountingHole', 'TestPoint', 'TEST_PAD', 'SolderJumper', 'Logo', 'Fiducial']
   readonlyFields    = ['Reference', 'Value', 'Footprint', 'Part Number']
   specialFields     = ['Reference', 'Value', 'Footprint', 'Datasheet', 'Part Number']
 
+  def copy(self):
+    return Symbol(super().copy())
+
   def properties(self):
     props = []
-    for arg in self.objArgs:
+    for arg in self._args:
       if isinstance(arg, Property):
         props.append(arg)
     return props
@@ -119,7 +79,7 @@ class Symbol(Object):
       if name not in self.specialFields:
         if name == propName:
           print("INFO: Removing", name, 'from', self.getProperty('Reference').value())
-          self.objArgs.remove(prop)
+          self._args.remove(prop)
           found += 1
         else:
           prop.setId(newId)
@@ -132,7 +92,7 @@ class Symbol(Object):
       newId = prop.pid() - found
       if name not in self.specialFields and not name.startswith('ki_'):
         print("INFO: Removing", name, 'from', self.getProperty('Reference').value())
-        self.objArgs.remove(prop)
+        self._args.remove(prop)
         found += 1
       else:
         prop.setId(newId)
@@ -148,12 +108,14 @@ class Symbol(Object):
     else:
       # Add property
       print('INFO: Adding property:', propName, '=', propVal)
-      newId=5
-      for prop in self.properties():
-        newId = prop.pid()
-      newId += 1
-      pos = self.objargsNamed("at")[0]
-      self.objArgs.append(Property.new(propName, propVal, pos.objArgs[1], pos.objArgs[2], newId))
+      # Use the last property as reference to create the new one
+      # keeping the same identation all the other parameters
+      newProp = self.properties()[-1].copy()
+      newProp.setName(propName)
+      newProp.setValue(propVal)
+      newProp.setId(newProp.pid() + 1)
+      # Add new property
+      self._args.append(newProp)
 
   def isSpecial(self):
     reference = self.getProperty('Reference').value()
@@ -188,96 +150,23 @@ class Symbol(Object):
 
     self.addProperty(populateFieldName, populate)
 
-class Document(Object):
-  @classmethod
-  def __tokenize(cls, body: str) -> list:
-    # Convert a string of characters into a list of tokens.
-    tokens = []
-    token = ''
-    inString = False
-    prevChar = ''
-    for c in body:
-      if c == '"':
-        token += c
-        if inString and (prevChar != '\\'):
-          inString = False
-          tokens.append(token)
-          token = ''
-        else:
-          inString = True
-      elif inString:
-        # If in a string, ignore character and append it to the token
-        token += c
-      elif (c == '(') or (c == ')'):
-        # Store previous token if not empty
-        if len(token) > 0:
-          tokens.append(token)
-        # Add parentheses as another token
-        tokens.append(c)
-        token = ''
-      elif c.isspace():
-        # Store previous token if not empty and ignore space
-        if len(token) > 0:
-          tokens.append(token)
-          token = ''
-      else:
-        token += c
-
-      prevChar = c
-    return tokens
-
-  @classmethod
-  def __parseTokens(cls, tokens: list) -> (Token, String, Integer, Float, Object, Symbol, Property):
-    # Read an expression from a sequence of tokens.
-    if len(tokens) == 0:
-      raise SyntaxError('unexpected EOF')
-    token = tokens.pop(0)
-    if token == '(':
-      L = []
-      while tokens[0] != ')':
-        L.append(cls.__parseTokens(tokens))
-      tokens.pop(0) # pop off ')'
-      if L[0] == "symbol":
-        return Symbol.fromList(L)
-      elif L[0] == "property":
-        return Property.fromList(L)
-      else:
-        return Object.fromList(L)
-    elif token == ')':
-      raise SyntaxError('unexpected )')
-    else:
-      # Numbers become numbers; every other token is a Token.
-      try: return Integer(token)
-      except ValueError:
-        try: return Float(token)
-        except ValueError:
-          strVal = str(token)
-          if strVal[0] == '"' and strVal[-1] == '"':
-            return String(strVal)
-          else:
-            return Token(strVal)
-
-  def readFile(self, filename):
-    # Read a Scheme expression from a file.
-    with open(filename) as f:
-      data = f.read()
-      tokens = self.__parseTokens(self.__tokenize(data))
-      self.objName = tokens.objName
-      self.objArgs = tokens.objArgs
-
-  def toFile(self, filename):
-    with open(filename, "w") as f:
-      f.write(self.serialize())
-      f.close()
-
 class Schematic(Document):
   def __init__(self, doNotPopulateMark = "DNP", populateFieldName = "Populate"):
     self.__doNotPopulateMark = doNotPopulateMark
     self.__populateFieldName = populateFieldName
 
+  def specialize(self, sexpr):
+    if sexpr._name._value == "property":
+      return Property(sexpr)
+
+    if sexpr._name._value == "symbol":
+      return Symbol(sexpr)
+
+    return sexpr
+
   def symbols(self):
     result = []
-    for arg in self.objArgs:
+    for arg in self._sexpr._args:
       if isinstance(arg, Symbol):
         result.append(arg)
     return result
@@ -311,10 +200,7 @@ class Schematic(Document):
   def renameFields(self, oldNames, newNames):
     for symbol in self.symbols():
       for idx, oldName in enumerate(oldNames):
-        propValue = symbol.getProperty(oldName)
-        if propValue == False:
+        prop = symbol.getProperty(oldName)
+        if prop == False:
           continue
-        propValue = propValue.value()
-        symbol.removeProp(oldName)
-        symbol.addProperty(newNames[idx], propValue)
-
+        prop.setName(newNames[idx])

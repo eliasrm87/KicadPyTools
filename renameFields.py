@@ -13,12 +13,12 @@ parser.add_argument("newNames", type=str,
                     help="Comma separated list of new names for fields specified before")
 args = parser.parse_args()
 
-sch      = Schematic.fromFile(args.source)
-destFile = args.destination
+sch = Schematic()
+sch.readFile(args.source)
 
 oldNames = [name.strip() for name in args.oldNames.split(',')]
 newNames = [name.strip() for name in args.newNames.split(',')]
 
 sch.renameFields(oldNames, newNames)
 
-sch.toFile(destFile)
+sch.toFile(args.destination)
