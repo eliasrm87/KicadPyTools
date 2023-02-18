@@ -3,11 +3,10 @@ from lib.comp_db import *
 
 class Property(SExpr):
   @classmethod
-  def new(cls, propName, propVal, x, y, propId):
+  def new(cls, propName, propVal, x, y):
     return cls(SExpr('property', [
       String(propName),
       String(propVal),
-      SExpr('id', [propId]),
       SExpr('at', [x, y, 0]),
       SExpr('effects', [
         SExpr('font', [
@@ -26,17 +25,11 @@ class Property(SExpr):
   def value(self):
     return self._args[1]._value.strip('"')
 
-  def pid(self):
-    return self.argsNamed('id')[0]._args[0]._value
-
   def setName(self, newName):
     self._args[0]._value = String(newName)
 
   def setValue(self, newVal):
     self._args[1]._value = String(newVal)
-
-  def setId(self, newId):
-    self.argsNamed('id')[0]._args[0]._value = newId
 
 class Symbol(SExpr):
   specialReferences = ['#PWR', '#FLG', '#GND', '#SYM']
@@ -71,31 +64,21 @@ class Symbol(SExpr):
       print("ERROR: cannot delete special property {}".format(propName))
       return
 
-    found = 0
     specialPropsFound = []
     for prop in self.properties():
       name = prop.name()
-      newId = prop.pid() - found
       if name not in self.specialFields:
         if name == propName:
           print("INFO: Removing", name, 'from', self.getProperty('Reference').value())
           self._args.remove(prop)
-          found += 1
-        else:
-          prop.setId(newId)
 
   def cleanProperties(self):
-    found = 0
     specialPropsFound = []
     for prop in self.properties():
       name = prop.name()
-      newId = prop.pid() - found
       if name not in self.specialFields and not name.startswith('ki_'):
         print("INFO: Removing", name, 'from', self.getProperty('Reference').value())
         self._args.remove(prop)
-        found += 1
-      else:
-        prop.setId(newId)
 
   def addProperty(self, propName, propVal):
     # Add / Modify property
@@ -113,7 +96,6 @@ class Symbol(SExpr):
       newProp = self.properties()[-1].copy()
       newProp.setName(propName)
       newProp.setValue(propVal)
-      newProp.setId(newProp.pid() + 1)
       # Add new property
       self._args.append(newProp)
 
