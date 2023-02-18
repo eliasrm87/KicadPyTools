@@ -19,9 +19,9 @@ class CompDB():
             if len(row[colName]) > 0 and symbolPropsDict[colName].value().find(row[colName]) != -1:
               i += 1
           if i == len(columnNames):
-            print('INFO:', symbolPropsDict['Reference'], 'Matched by (', ', '.join(columnNames), ')', end=' ')
+            print('INFO:', symbolPropsDict['Reference'].value(), 'Matched by', end=' ')
             for column in columnNames:
-              print(symbolPropsDict[column], end=' ')
+              print(column + '="' +symbolPropsDict[column].value(), end='" ')
             print('')
             return row
     return []

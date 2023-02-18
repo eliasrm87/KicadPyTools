@@ -1,5 +1,6 @@
 from lib.s_expression import *
 from lib.comp_db import *
+import re
 
 class Property(SExpr):
   @classmethod
@@ -85,7 +86,7 @@ class Symbol(SExpr):
     prop = self.getProperty(propName)
     if prop != False:
       # Modify property
-      if propName not in self.readonlyFields and len(propVal) > 0:
+      if ((propName not in self.readonlyFields) or (len(prop.value()) == 0)) and len(propVal) > 0:
         print('INFO: Updating property:', propName, '=', propVal)
         prop.setValue(propVal)
     else:
@@ -113,29 +114,48 @@ class Symbol(SExpr):
     return False
 
   def isPopulated(self, doNotPopulateMark = "DNP"):
-    # Special symbols are not populated
-    if self.isSpecial():
-      return False
-
+    # If magic word is part of the value, the symbol is considered to not be populated
     value = self.getProperty('Value').value()
-
-    # If magic word is part of the value, the symbol is marked to not be populated
     if value.find(doNotPopulateMark) != -1:
       return False
 
-    return True
+    # Return value for the DNP attribute
+    return self.argsNamed('dnp')[0]._args[0]._value != 'yes'
 
-  def addPopulateField(self, doNotPopulateMark = "DNP", populateFieldName = "Populate"):
-    populate = 'N'
+  def isInBom(self):
+    # Special symbols are not in BoM
+    if self.isSpecial():
+      return False
+
+    # Return value for the DNP attribute
+    return self.argsNamed('in_bom')[0]._args[0]._value == 'yes'
+
+  def addPopulateAttr(self, doNotPopulateMark = "DNP"):
+    # Find value for DNP attribute
+    dnp = 'yes'
     if self.isPopulated(doNotPopulateMark):
-      populate = 'Y'
+      dnp = 'no'
 
-    self.addProperty(populateFieldName, populate)
+    # Set DNP attribute
+    self.argsNamed('dnp')[0]._args[0]._value = dnp
+
+    # Remove DNP mark from the value
+    value = self.getProperty('Value').value()
+    pattern = re.compile(' [^ ]*' + doNotPopulateMark + '[^ ]')
+    self.getProperty('Value').setValue(pattern.sub('', value))
+
+  def addInBomAttr(self):
+    # Find in_bom for DNP attribute
+    inBom = 'no'
+    if self.isInBom():
+      inBom = 'yes'
+
+    # Set in_bom attribute
+    self.argsNamed('in_bom')[0]._args[0]._value = inBom
 
 class Schematic(Document):
-  def __init__(self, doNotPopulateMark = "DNP", populateFieldName = "Populate"):
+  def __init__(self, doNotPopulateMark = "DNP"):
     self.__doNotPopulateMark = doNotPopulateMark
-    self.__populateFieldName = populateFieldName
 
   def specialize(self, sexpr):
     if sexpr._name._value == "property":
@@ -153,9 +173,13 @@ class Schematic(Document):
         result.append(arg)
     return result
 
-  def addPopulateFields(self):
+  def addPopulateAttrs(self):
     for symbol in self.symbols():
-      symbol.addPopulateField(self.__doNotPopulateMark, self.__populateFieldName)
+      symbol.addPopulateAttr(self.__doNotPopulateMark)
+
+  def addInBomAttrs(self):
+    for symbol in self.symbols():
+      symbol.addInBomAttr()
 
   def updateFieldsFromDB(self, compDB : CompDB, keyPropNames):
     for symbol in self.symbols():
@@ -173,7 +197,7 @@ class Schematic(Document):
         for propName in compDB.propNames:
           symbol.addProperty(propName, match[propName])
       else:
-        print('ERROR: No match found for', symbolPropsDict['Reference'])
+        print('ERROR: No match found for', reference, value)
 
   def cleanSymbolProperties(self):
     for symbol in self.symbols():

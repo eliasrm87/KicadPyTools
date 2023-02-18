@@ -203,6 +203,9 @@ class SExpr():
           args.append(arg)
     return args
 
+  def args(self):
+    return self._args
+
   def serialize(self):
     if DEBUG:
       print('SExpr::serialize')
